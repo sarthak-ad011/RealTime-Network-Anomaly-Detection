@@ -1,3 +1,7 @@
 .venv/
 .env
 data/raw/
+.DS_Store
+start_mlflow.sh
+mlflow.db
+01_train_models.ipynb
