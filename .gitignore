@@ -5,3 +5,6 @@ data/raw/
 start_mlflow.sh
 mlflow.db
 01_train_models.ipynb
+checkpoints/
+mlruns/
+data/reference
