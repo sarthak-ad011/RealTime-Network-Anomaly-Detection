@@ -8,3 +8,4 @@ mlflow.db
 checkpoints/
 mlruns/
 data/reference
+__pycache__
