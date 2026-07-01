@@ -9,3 +9,5 @@ checkpoints/
 mlruns/
 data/reference
 __pycache__
+logs/
+mlflow.db.backup

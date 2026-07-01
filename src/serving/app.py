@@ -6,6 +6,8 @@ is logged to S3 for drift detection.
 """
 from __future__ import annotations
 
+import src.log_config  # noqa: F401 — activate file logging
+
 import asyncio
 import json
 import os
@@ -28,7 +30,7 @@ from starlette.responses import Response
 from src.data.loader import FEATURE_COLS
 from src.models.lstm_autoencoder import LSTMAutoencoder, LSTMConfig
 
-MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
 MODEL_NAME = "network-anomaly-detector"
 PREDICTION_BUCKET = os.getenv("PREDICTION_BUCKET", "anomaly-mlops-artifacts-dev")
 
@@ -72,10 +74,13 @@ class LoadedModel:
 def load_from_mlflow(stage):
     mlflow.set_tracking_uri(MLFLOW_URI)
     client = mlflow.tracking.MlflowClient()
-    versions = client.get_latest_versions(MODEL_NAME, stages=[stage])
+    versions = client.search_model_versions(
+        f"name='{MODEL_NAME}'",
+    )
+    versions = [v for v in versions if v.current_stage == stage]
     if not versions:
         return None
-    v = versions[0]
+    v = max(versions, key=lambda v: int(v.version))
     local = client.download_artifacts(v.run_id, "model")
     pt = next(Path(local).glob("*.pt"), None)
     scaler_p = next(Path(local).glob("*_scaler.pkl"), None)

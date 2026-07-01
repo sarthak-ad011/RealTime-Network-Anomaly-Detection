@@ -6,6 +6,8 @@ Usage:
 """
 from __future__ import annotations
 
+import src.log_config  # noqa: F401 — activate file logging
+
 import os
 import pickle
 from pathlib import Path
