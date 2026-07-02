@@ -1,0 +1,12 @@
+.venv
+.git
+.pytest_cache
+__pycache__
+data
+mlruns
+mlflow.db
+mlflow.db.backup
+checkpoints
+logs
+notebooks
+.DS_Store
