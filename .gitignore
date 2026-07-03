@@ -11,3 +11,5 @@ data/reference
 __pycache__
 logs/
 mlflow.db.backup
+.terraform
+.terraform.lock.hcl

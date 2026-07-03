@@ -32,7 +32,7 @@ resource "aws_security_group" "mlflow_db" {
 resource "aws_db_instance" "mlflow" {
   identifier             = "mlflow-${var.environment}"
   engine                 = "postgres"
-  engine_version         = "16.3"
+  engine_version         = "16" # major version only; AWS selects a current minor
   instance_class         = "db.t4g.micro"
   allocated_storage      = 20
   storage_encrypted      = true
