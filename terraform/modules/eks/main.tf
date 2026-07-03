@@ -107,7 +107,7 @@ resource "aws_eks_node_group" "general" {
   node_group_name = "general"
   node_role_arn   = var.node_role_arn
   subnet_ids      = aws_subnet.private[*].id
-  instance_types  = ["t3.medium"]
+  instance_types  = ["t3.small"]
   capacity_type   = "ON_DEMAND"
   scaling_config {
     desired_size = 2
@@ -122,7 +122,7 @@ resource "aws_eks_node_group" "spot" {
   node_group_name = "spot-batch"
   node_role_arn   = var.node_role_arn
   subnet_ids      = aws_subnet.private[*].id
-  instance_types  = ["t3.medium", "t3a.medium"]
+  instance_types  = ["t3.small"]
   capacity_type   = "SPOT"
   scaling_config {
     desired_size = 1
