@@ -11,9 +11,6 @@ End-to-end MLOps platform that detects anomalous network traffic in real time an
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green" />
 </p>
 
-> **Demo:** [3-minute walkthrough](#) · **Write-up:** [architecture deep-dive](docs/architecture.md)
->
-> _(replace the demo link with your unlisted YouTube URL)_
 
 ---
 
