@@ -1,2 +1,25 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
+metadata:
+  name: anomaly-inference
+  namespace: mlops
+spec:
+  replicas: 4
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: anomaly-inference
+  template:
+    metadata:
+      labels:
+        app: anomaly-inference
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: api
+          image: PLACEHOLDER_ECR_URI/anomaly-mlops:v1
+          ports:
+            - containerPort: 8000
