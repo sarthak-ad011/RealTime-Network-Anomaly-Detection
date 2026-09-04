@@ -43,16 +43,20 @@ def _read_record(key):
 def load_recent(hours: int = 24) -> pd.DataFrame:
     """Fetch prediction records written in the last `hours` from S3."""
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
-    keys = []
+    candidates = []
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=BUCKET, Prefix="predictions/"):
         for obj in page.get("Contents", []):
             if obj["LastModified"] >= cutoff:
-                keys.append(obj["Key"])
-        if len(keys) >= MAX_OBJECTS:
-            logger.warning(f"capping at {MAX_OBJECTS} prediction objects")
-            keys = keys[:MAX_OBJECTS]
-            break
+                candidates.append((obj["LastModified"], obj["Key"]))
+    # Keep the NEWEST objects when capping. S3 lists keys lexicographically and the
+    # keys are UUIDs, so truncating the listing would sample arbitrarily across the
+    # window and could omit the very traffic a drift check is meant to notice.
+    candidates.sort(key=lambda kv: kv[0], reverse=True)
+    if len(candidates) > MAX_OBJECTS:
+        logger.warning(f"capping at the {MAX_OBJECTS} most recent of {len(candidates)} objects")
+        candidates = candidates[:MAX_OBJECTS]
+    keys = [k for _, k in candidates]
     # one GET per record: fan out so a few thousand objects don't take minutes
     with ThreadPoolExecutor(max_workers=32) as pool:
         rows = [r for r in pool.map(_read_record, keys) if r is not None]
