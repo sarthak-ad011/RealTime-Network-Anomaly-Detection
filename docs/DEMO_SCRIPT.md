@@ -172,9 +172,71 @@ Then tear the stack down — every prediction is an S3 PUT and the cluster is ~$
 
 ```bash
 cd terraform/environments/dev
-source ~/.anomaly-mlops-dev.env      # TF_VAR_db_password is required by destroy
-terraform destroy
+source ~/.anomaly-mlops-dev.env      # TF_VAR_db_password is REQUIRED by destroy
+
+# APPLY FIRST — this is not optional, and it is the step that gets skipped.
+#
+# The artifacts bucket and the ECR repo are never empty at teardown: a single demo
+# afternoon leaves >100k prediction objects (plus a version each, because versioning
+# is on) and CI pushes one image per commit. Neither resource deletes while
+# non-empty, so the modules set force_destroy / force_delete.
+#
+# But Terraform reads force_destroy from STATE, not from the configuration, when it
+# builds a destroy plan. Editing the .tf file is not enough — the flag has to be
+# applied into state first. Skip this apply and destroy fails with:
+#
+#   Error deleting S3 Bucket (anomaly-mlops-artifacts-dev): BucketNotEmpty:
+#   The bucket you tried to delete is not empty. You must delete all versions.
+#
+# Terraform then continues destroying everything else and exits non-zero at the end,
+# which is the worst shape to be in: most of the stack gone, the state file now
+# describing a bucket that still exists, and no clear signal about what is left
+# running. This happened on 2026-09-04 and the cleanup had to be finished by hand
+# in the console.
+terraform apply -auto-approve        # no infrastructure change; lands the flags in state
+terraform destroy -auto-approve
 ```
+
+Verify nothing survived, rather than trusting the exit code:
+
+```bash
+aws eks list-clusters --region ap-south-1                 # expect: []
+aws rds describe-db-instances --region ap-south-1 \
+  --query 'DBInstances[].DBInstanceIdentifier'            # expect: []
+aws ec2 describe-nat-gateways --region ap-south-1 \
+  --query 'NatGateways[?State==`available`].NatGatewayId'  # expect: []
+aws ec2 describe-instances --region ap-south-1 \
+  --query 'Reservations[].Instances[?State.Name==`running`].InstanceId'
+aws s3 ls | grep anomaly                                  # only the tfstate bucket
+```
+
+Query AWS directly like this rather than trusting terraform's exit code or its state
+file — if destroy failed partway, state is exactly the thing that is now wrong.
+
+The NAT gateway and the EKS control plane are the two line items that keep charging
+whether or not anything is running on them — check those two even if you check nothing
+else.
+
+The `anomaly-mlops-tfstate` bucket is meant to survive: it holds the state file that
+makes the next `terraform apply` reproducible, and costs a few cents a month. It is
+easy to sweep up by accident when clearing buckets by hand. If it is gone, recreate it
+before anything else — `terraform init` cannot configure its backend without it:
+
+```bash
+aws s3api create-bucket --bucket anomaly-mlops-tfstate --region ap-south-1 \
+  --create-bucket-configuration LocationConstraint=ap-south-1
+aws s3api put-bucket-versioning --bucket anomaly-mlops-tfstate \
+  --versioning-configuration Status=Enabled
+
+cd terraform/environments/dev
+terraform init -reconfigure
+```
+
+Losing it is recoverable but not free: terraform starts from an empty state, so it
+knows about nothing that already exists. That is fine after a clean teardown and
+actively dangerous after a partial one — verify with the AWS queries above that the
+account really is empty before applying into a blank state, or you will get a second
+copy of anything that survived.
 
 ---
 

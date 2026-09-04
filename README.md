@@ -162,6 +162,13 @@ pytest -v
 Measured results from a real deployment of this stack are in **[`docs/DEPLOYMENT_EVIDENCE.md`](docs/DEPLOYMENT_EVIDENCE.md)** — canary gate measurements, the auto-rollback, drift detection, and the promotion decision, captured from the running cluster. High level:
 
 ```bash
+# The remote state bucket is not managed by this config — it has to exist before
+# `terraform init` can configure the backend against it.
+aws s3api create-bucket --bucket anomaly-mlops-tfstate --region ap-south-1 \
+  --create-bucket-configuration LocationConstraint=ap-south-1
+aws s3api put-bucket-versioning --bucket anomaly-mlops-tfstate \
+  --versioning-configuration Status=Enabled
+
 # Provision everything (EKS, ECR, RDS, S3, IAM, OIDC)
 cd terraform/environments/dev
 export TF_VAR_db_password='<a-strong-password>'
@@ -174,7 +181,35 @@ aws eks update-kubeconfig --name anomaly-dev --region ap-south-1
 # Argo CD then syncs the app from Git; CI/CD ships new versions on every push.
 ```
 
-> **Cost note:** running 24/7 is roughly $5–6/day (EKS control plane + nodes + NAT + RDS). `terraform destroy` drops it to near-zero — tear down between sessions and bring it back with `terraform apply` when needed.
+### Tearing it down
+
+```bash
+cd terraform/environments/dev
+source ~/.anomaly-mlops-dev.env      # TF_VAR_db_password is required by destroy too
+
+terraform apply -auto-approve        # see below — do not skip
+terraform destroy -auto-approve
+```
+
+That `apply` before the `destroy` is load-bearing. The artifacts bucket holds one
+object per prediction — a single demo afternoon left **139,314** of them, each with a
+version — and neither S3 nor ECR will delete while non-empty. The modules set
+`force_destroy` / `force_delete` to handle that, but **Terraform reads those flags from
+state, not from the configuration**, when planning a destroy. Without the apply,
+teardown fails on `BucketNotEmpty`, carries on destroying everything else, and exits
+non-zero with the state file now describing a bucket that still exists.
+
+Then confirm against AWS rather than trusting the exit code — after a partial destroy,
+state is precisely the thing that is wrong:
+
+```bash
+aws eks list-clusters --region ap-south-1
+aws rds describe-db-instances --region ap-south-1 --query 'DBInstances[].DBInstanceIdentifier'
+aws ec2 describe-nat-gateways --region ap-south-1 --query 'NatGateways[?State==`available`]'
+aws ec2 describe-addresses --region ap-south-1 --query 'Addresses[].PublicIp'
+```
+
+> **Cost note:** running 24/7 is roughly $5–6/day (EKS control plane + nodes + NAT + RDS). The NAT gateway and the EKS control plane bill whether or not anything runs on them, so they are the two worth checking after every teardown. Tear down between sessions and bring it back with `terraform apply` when needed.
 
 ---
 

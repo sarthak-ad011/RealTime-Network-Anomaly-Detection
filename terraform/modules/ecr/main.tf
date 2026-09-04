@@ -1,5 +1,8 @@
 resource "aws_ecr_repository" "anomaly" {
-  name                 = "anomaly-mlops"
+  name = "anomaly-mlops"
+  # Same reason as the artifacts bucket: CI pushes an image per commit, so the
+  # repository is never empty at destroy time and the delete fails without this.
+  force_delete         = true
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration { scan_on_push = true }
   encryption_configuration { encryption_type = "AES256" }

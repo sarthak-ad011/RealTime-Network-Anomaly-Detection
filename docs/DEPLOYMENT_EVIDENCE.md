@@ -109,6 +109,20 @@ back to what Git says.
 > broken manifest to `main`. What is demonstrated is the Argo Rollouts analysis gate
 > and the Argo CD self-heal — not a bad commit travelling the full CI path.
 
+The same test was run a second time during the demo recording and reproduced exactly —
+`AnalysisRun anomaly-inference-cc4c69c45-10-2`, revision 10:
+
+```
+RolloutAborted: Rollout aborted update to revision 10: Step-based analysis
+phase error/failed: Metric "anomaly-flag-rate" assessed Failed due to
+failed (2) > failureLimit (1)
+
+Ready=4 Available=4     <- stable fleet untouched throughout
+```
+
+Six minutes from bad deploy to automatic revert, with no human in the loop and no
+request served by a broken model beyond the 10% canary slice.
+
 ---
 
 ## 4. Drift detection — negative control (in-distribution traffic)
@@ -310,5 +324,38 @@ is live; the retrain and promote legs are wired but unexercised in this deployme
 
 Running cost is roughly $8–10/day, so the stack is destroyed between sessions and
 rebuilt with `terraform apply`. That is only survivable because Git is the source of
-truth: Argo CD reconstitutes the workloads, and the artifacts outlive the cluster in
-S3 and RDS.
+truth: Argo CD reconstitutes the workloads from the manifests, and the trained model
+survives in `checkpoints/` and the local MLflow store.
+
+### Teardown, and the way it actually failed
+
+The artifacts bucket held **139,314 objects** after a single afternoon — one per
+prediction, each with a version because versioning is on — and ECR held an image per
+commit. Neither `aws_s3_bucket` nor `aws_ecr_repository` deletes while non-empty, so
+`terraform destroy` failed on the bucket:
+
+```
+13:26:55  anomaly-mlops (Terraform)  DeleteBucket anomaly-mlops-artifacts-dev
+          errorCode: BucketNotEmpty
+          "The bucket you tried to delete is not empty.
+           You must delete all versions in the bucket."
+```
+
+Adding `force_destroy` / `force_delete` to the modules is necessary but **not
+sufficient**: Terraform reads those flags from *state*, not from the configuration,
+when it plans a destroy. Editing the `.tf` files and running `terraform destroy`
+straight after leaves the old `force_destroy = false` in state and changes nothing. The
+sequence has to be `terraform apply` (a no-op against AWS, but it lands the flags) and
+only then `terraform destroy`.
+
+The failure mode is unpleasant because it is partial and quiet. Terraform carried on
+destroying every independent resource and only surfaced the error at the end — leaving
+most of the stack gone, a state file describing a bucket that still existed, and no
+clear signal about what was still running. The remaining buckets had to be removed by
+hand, and the state bucket was swept up with them in the same pass.
+
+The lesson that generalises: **after a failed destroy, the state file is the least
+trustworthy thing you own.** Verification has to query AWS directly —
+`aws eks list-clusters`, `describe-nat-gateways`, `describe-addresses`,
+`describe-db-instances` — because those are the resources that keep billing whether or
+not anything runs on them. Commands are in `docs/DEMO_SCRIPT.md`.
