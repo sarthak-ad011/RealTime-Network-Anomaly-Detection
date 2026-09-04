@@ -21,7 +21,7 @@ spec:
       serviceAccountName: anomaly-sa
       containers:
         - name: api
-          image: 170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:26311a4
+          image: 170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:c2c1d7f
           ports:
             - name: http
               containerPort: 8000
