@@ -66,8 +66,12 @@ env:
     value: anomaly-mlops-artifacts-dev
   - name: MLFLOW_TRACKING_URI
     value: http://mlflow.mlops.svc.cluster.local:5000
+  # Task pods run the same image the API runs, so the drift job Airflow schedules is
+  # byte-identical to the one in k8s/demo/drift-job.yaml. CI's manifest bump rewrites
+  # the tag in k8s/base/inference-rollout.yaml but not here, so this is updated with
+  # the release — see the note in the README's orchestration section.
   - name: ANOMALY_IMAGE
-    value: 170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:553ec6c
+    value: 170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:fd80dbd
   - name: AWS_REGION
     value: ap-south-1
   - name: AWS_DEFAULT_REGION
@@ -79,13 +83,20 @@ config:
     # start_date would queue a run for every 6h slot since January.
     dags_are_paused_at_creation: 'True'
     load_examples: 'False'
-  # Remote logging to S3 is deliberately left off: with KubernetesExecutor the task
-  # log lives in the worker pod, and the UI reads it live over the Kubernetes API
-  # while the pod exists. Shipping to S3 needs an `aws_default` connection that
-  # resolves a region, and a misconfigured one silently swallows task logs — the
-  # one thing you cannot afford to lose when a scheduled retrain fails at 3am.
+  logging:
+    # Not optional with KubernetesExecutor: the worker pod is deleted as soon as the
+    # task finishes and its logs go with it. The first run of this DAG failed and the
+    # reason was already unrecoverable by the time anyone looked. Credentials come
+    # from IRSA (see serviceAccount annotations below), so `aws_default` resolves
+    # without a stored secret.
+    remote_logging: 'True'
+    remote_base_log_folder: 's3://anomaly-mlops-artifacts-dev/airflow-logs'
+    remote_log_conn_id: 'aws_default'
 
 scheduler:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::170420138680:role/anomaly-mlops-irsa-dev
   resources:
     requests:
       cpu: 200m
@@ -95,6 +106,9 @@ scheduler:
       memory: 1536Mi
 
 webserver:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::170420138680:role/anomaly-mlops-irsa-dev
   resources:
     requests:
       cpu: 150m
@@ -112,6 +126,9 @@ webserver:
     password: admin
 
 workers:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::170420138680:role/anomaly-mlops-irsa-dev
   resources:
     requests:
       cpu: 100m

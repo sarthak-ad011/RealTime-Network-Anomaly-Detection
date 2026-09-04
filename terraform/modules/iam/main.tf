@@ -47,10 +47,21 @@ output "eks_node_role_arn" { value = aws_iam_role.eks_node.arn }
 # ---------------------------------------------------------------------------
 variable "oidc_provider_arn" { type = string }
 variable "oidc_provider_url" { type = string }
-variable "service_account" {
-  type        = string
-  default     = "system:serviceaccount:mlops:anomaly-sa"
-  description = "The only principal allowed to assume this role."
+variable "service_accounts" {
+  type = list(string)
+  default = [
+    # Inference, MLflow, and every drift/training pod.
+    "system:serviceaccount:mlops:anomaly-sa",
+    # Airflow's own pods. The scheduler runs the DAG's BranchPythonOperator, which
+    # reads the drift marker from S3 directly rather than in a task pod, and the
+    # worker pods run clear_marker the same way. EKS nodes here restrict the IMDS
+    # hop limit, so a pod cannot borrow the node role's credentials — without these
+    # entries those tasks fail with NoCredentialsError.
+    "system:serviceaccount:airflow:airflow-scheduler",
+    "system:serviceaccount:airflow:airflow-worker",
+    "system:serviceaccount:airflow:airflow-webserver",
+  ]
+  description = "Principals allowed to assume the mlops IRSA role."
 }
 
 resource "aws_iam_role" "irsa_mlops" {
@@ -64,7 +75,7 @@ resource "aws_iam_role" "irsa_mlops" {
       Condition = {
         StringEquals = {
           "${var.oidc_provider_url}:aud" = "sts.amazonaws.com"
-          "${var.oidc_provider_url}:sub" = var.service_account
+          "${var.oidc_provider_url}:sub" = var.service_accounts
         }
       }
     }]

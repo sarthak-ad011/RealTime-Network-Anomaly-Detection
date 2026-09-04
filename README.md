@@ -197,9 +197,20 @@ Two decisions worth calling out:
   chart's bundled Postgres runs on an `emptyDir` and would lose every DAG run whenever
   the pod moved — which, on a two-node cluster, is often.
 
-Task pods run as `anomaly-sa` in the `mlops` namespace, which is the only principal the
-IRSA trust policy names; `k8s/airflow/pod-launcher-rbac.yaml` grants the cross-namespace
-pod-create that the chart's own RBAC does not.
+Task pods run as `anomaly-sa` in the `mlops` namespace, and
+`k8s/airflow/pod-launcher-rbac.yaml` grants the cross-namespace pod-create that the
+chart's own RBAC does not.
+
+Airflow's *own* pods need AWS credentials too — the DAG's branch reads the drift marker
+from S3 in the scheduler, not in a task pod. There is no falling back to the node role
+here: the node group restricts the IMDS hop limit, so a pod cannot borrow it, and the
+first DAG run failed with `NoCredentialsError` for exactly that reason. The IRSA trust
+policy therefore names the Airflow service accounts alongside `anomaly-sa`
+(`terraform/modules/iam/main.tf`), and the chart annotates them with the role ARN.
+
+That same grant is what makes remote task logging work. Under KubernetesExecutor the
+worker pod is deleted the instant a task finishes, taking its logs with it — so task
+logs ship to S3 rather than living and dying in the pod.
 
 > **Scope note:** the `drift_check`, `branch` and `clear_marker` legs run against the
 > live cluster. The `retrain` leg is wired but not exercised in this deployment: it
