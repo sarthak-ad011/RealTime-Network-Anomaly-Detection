@@ -90,7 +90,13 @@ async def run(args):
     url = f"{args.endpoint.rstrip('/')}/predict"
     sent = anomalies = errors = 0
     start = time.time()
-    limits = httpx.Limits(max_connections=50)
+    # No keep-alive. A Kubernetes Service is a set of endpoints that kube-proxy
+    # rewrites as pods come and go; a pooled connection pins to whichever pod it
+    # first reached and keeps sending there even after the Service points
+    # elsewhere. During a canary that means traffic aimed at the canary Service
+    # silently keeps hitting stable pods, the canary records nothing, and the
+    # analysis evaluates an empty result set.
+    limits = httpx.Limits(max_connections=50, max_keepalive_connections=0)
 
     async with httpx.AsyncClient(limits=limits) as client:
         while True:

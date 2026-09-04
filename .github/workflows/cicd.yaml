@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'traffic_generator/**'
       - 'requirements.txt'
       - '.github/workflows/**'
   pull_request:
     branches: [main]
     paths:
       - 'src/**'
+      - 'traffic_generator/**'
       - 'requirements.txt'
 
 permissions:

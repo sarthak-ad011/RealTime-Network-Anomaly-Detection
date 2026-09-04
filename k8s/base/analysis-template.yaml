@@ -16,9 +16,15 @@ spec:
   metrics:
     # Standard SLO gate: the canary must stay fast.
     - name: p99-latency
+      # A freshly-scaled canary has served nothing yet, and rate() over a 2m window
+      # needs samples to exist. Without a delay the first measurements return an
+      # empty vector, which counts as an error rather than a failure and aborts the
+      # canary on a cold start instead of on a real regression.
+      initialDelay: 90s
       interval: 30s
       count: 4
       failureLimit: 1
+      consecutiveErrorLimit: 3
       successCondition: result[0] < 0.2
       provider:
         prometheus:
@@ -36,9 +42,11 @@ spec:
     # being behaviourally broken — e.g. flagging every flow as an attack. Guard the
     # prediction distribution itself, not just latency and error rate.
     - name: anomaly-flag-rate
+      initialDelay: 90s
       interval: 30s
       count: 4
       failureLimit: 1
+      consecutiveErrorLimit: 3
       successCondition: result[0] < 0.15
       provider:
         prometheus:
