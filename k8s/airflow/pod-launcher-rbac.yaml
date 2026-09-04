@@ -1,0 +1,40 @@
+# The chart's own RBAC only lets Airflow launch pods inside the `airflow` namespace.
+# Every task in the retraining DAG is a KubernetesPodOperator targeting `mlops` (so
+# the pods land next to MLflow and inherit `anomaly-sa`'s IRSA credentials), which
+# is a cross-namespace create the chart does not grant. Without this the DAG fails
+# at the first task with `pods is forbidden: User
+# "system:serviceaccount:airflow:airflow-worker" cannot create resource "pods"`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-pod-launcher
+  namespace: mlops
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
+  - apiGroups: [""]
+    # get_logs=True on the operators streams task output back into the Airflow UI.
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    # do_xcom_push=True reads the task's return value out of the sidecar.
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-pod-launcher
+  namespace: mlops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: airflow-pod-launcher
+subjects:
+  - kind: ServiceAccount
+    name: airflow-worker
+    namespace: airflow
+  - kind: ServiceAccount
+    name: airflow-scheduler
+    namespace: airflow

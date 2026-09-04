@@ -98,10 +98,13 @@ network-anomaly-mlops/
 │   ├── models/                       # Isolation Forest + LSTM autoencoder
 │   ├── training/                     # training CLI + champion/challenger gate
 │   ├── serving/                      # FastAPI app (champion + shadow) + Dockerfile
-│   └── drift/                        # Evidently drift job
+│   ├── drift/                        # Evidently drift job
+│   └── tests/                        # model + promotion-gate unit tests
 ├── terraform/                        # EKS, ECR, RDS, S3, IAM, GitHub OIDC
 ├── k8s/                              # Kustomize manifests, Argo CD app, Rollout
+│   └── airflow/                      # Airflow chart values + pod-launcher RBAC
 ├── pipelines/airflow/dags/           # drift → retrain → promote DAG
+├── scripts/                          # platform install + evidence capture
 ├── traffic_generator/                # synthetic normal/attack/drift traffic
 ├── tests/                            # model + promotion-gate unit tests
 └── .github/workflows/cicd.yaml       # CI/CD pipeline
@@ -136,14 +139,14 @@ curl -X POST localhost:8000/predict -H 'Content-Type: application/json' \
   -d '{"features":[1500000,12,10,250,200,5000,50,100000,50000,50000,220,180,0.1,5,230]}'
 
 # 6. Run the tests
-pytest tests/ -v
+pytest -v
 ```
 
 ---
 
 ## Deploy to AWS
 
-The full cloud deployment is documented step by step — infrastructure, GitOps, CI/CD, monitoring, and the retraining loop — in **[`MASTER_PLAN_FULL.md`](MASTER_PLAN_FULL.md)**. High level:
+Measured results from a real deployment of this stack are in **[`docs/DEPLOYMENT_EVIDENCE.md`](docs/DEPLOYMENT_EVIDENCE.md)** — canary gate measurements, the auto-rollback, drift detection, and the promotion decision, captured from the running cluster. High level:
 
 ```bash
 # Provision everything (EKS, ECR, RDS, S3, IAM, OIDC)
@@ -159,6 +162,51 @@ aws eks update-kubeconfig --name anomaly-dev --region ap-south-1
 ```
 
 > **Cost note:** running 24/7 is roughly $5–6/day (EKS control plane + nodes + NAT + RDS). `terraform destroy` drops it to near-zero — tear down between sessions and bring it back with `terraform apply` when needed.
+
+---
+
+## Orchestration (the retraining loop)
+
+Argo CD keeps the *deployed* state in sync with Git. Airflow is what makes the
+system react to its own data. It runs the closed loop on a 6-hourly schedule:
+
+```
+drift_check ──▶ branch ──▶ retrain ──▶ promote ──▶ clear_marker
+  (Evidently)      │        (train)     (gate)
+                   └──────▶ skip
+```
+
+Each task is a `KubernetesPodOperator` running the *same image the API runs*, so the
+drift job Airflow schedules is byte-identical to the one in `k8s/demo/drift-job.yaml`.
+The branch reads the S3 drift marker rather than the drift task's return value, so a
+marker written by any source — a manual run, an alert-driven job — triggers the same
+retraining path.
+
+```bash
+source ~/.anomaly-mlops-dev.env      # TF_VAR_db_password
+./scripts/install_airflow.sh
+kubectl -n airflow port-forward svc/airflow-webserver 8080:8080   # admin / admin
+```
+
+Two decisions worth calling out:
+
+- **KubernetesExecutor, not Celery.** Every task is already a pod; Celery would add a
+  Redis and a pool of idle workers to schedule pods Kubernetes can schedule itself.
+  Nothing runs between the 6-hourly ticks.
+- **Airflow shares the RDS instance** MLflow uses, in its own `airflow` database. The
+  chart's bundled Postgres runs on an `emptyDir` and would lose every DAG run whenever
+  the pod moved — which, on a two-node cluster, is often.
+
+Task pods run as `anomaly-sa` in the `mlops` namespace, which is the only principal the
+IRSA trust policy names; `k8s/airflow/pod-launcher-rbac.yaml` grants the cross-namespace
+pod-create that the chart's own RBAC does not.
+
+> **Scope note:** the `drift_check`, `branch` and `clear_marker` legs run against the
+> live cluster. The `retrain` leg is wired but not exercised in this deployment: it
+> calls `load_raw()`, which reads CIC-IDS2017 CSVs from a local path, and the 2.8M-row
+> dataset is neither baked into the image nor staged in S3. Closing that gap means
+> teaching `src/data/loader.py` to read `s3://` and staging the raw data — see the
+> roadmap.
 
 ---
 
@@ -207,7 +255,7 @@ The autoencoder trains on benign flows only (1.59M after the split), so the 19.7
 ## Testing
 
 ```bash
-pytest tests/ -v
+pytest -v
 ```
 
 Unit tests cover the model interfaces (Isolation Forest + LSTM autoencoder fit/predict/evaluate) and every branch of the champion/challenger promotion gate — the critical code that decides whether a new model reaches production.
@@ -216,6 +264,8 @@ Unit tests cover the model interfaces (Isolation Forest + LSTM autoencoder fit/p
 
 ## Roadmap
 
+- [ ] Stage the raw dataset in S3 and teach `src/data/loader.py` to read `s3://`, so the
+      DAG's `retrain` leg runs in-cluster and the loop closes without a laptop
 - [ ] Swap synthetic traffic for replayed PCAP / eBPF flow data
 - [ ] Graph neural network over pod-to-pod traffic
 - [ ] Exact traffic splitting via service mesh (currently pod-ratio based)

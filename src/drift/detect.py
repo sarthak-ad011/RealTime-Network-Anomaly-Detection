@@ -26,6 +26,10 @@ REFERENCE_KEY = os.getenv("REFERENCE_KEY", "reference/training_reference.parquet
 MARKER_KEY = os.getenv("DRIFT_MARKER_KEY", "drift/drift_detected.json")
 MAX_OBJECTS = int(os.getenv("DRIFT_MAX_OBJECTS", "20000"))
 MIN_ROWS = int(os.getenv("DRIFT_MIN_ROWS", "100"))
+# How far back to look. The default matches the 6-hourly DAG with room to spare;
+# a shorter window isolates a recent traffic change from the day's backlog, which
+# otherwise averages a genuine shift away into hours of in-distribution history.
+WINDOW_HOURS = float(os.getenv("DRIFT_WINDOW_HOURS", "24"))
 
 s3 = boto3.client("s3")
 
@@ -40,7 +44,7 @@ def _read_record(key):
         return None
 
 
-def load_recent(hours: int = 24) -> pd.DataFrame:
+def load_recent(hours: float = WINDOW_HOURS) -> pd.DataFrame:
     """Fetch prediction records written in the last `hours` from S3."""
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
     candidates = []

@@ -1,0 +1,121 @@
+# Airflow values for the retraining orchestration layer (Phase 11).
+#
+# Two deliberate departures from the chart defaults:
+#
+#  1. KubernetesExecutor, not Celery. Every task in the retraining DAG is already a
+#     KubernetesPodOperator, so Celery would add a Redis and a pool of long-lived
+#     workers to schedule pods that Kubernetes can schedule itself. The executor
+#     launches one pod per task and nothing idles between the 6-hourly runs.
+#
+#  2. The bundled Postgres subchart is off; Airflow shares the same RDS instance
+#     MLflow uses, in its own `airflow` database. An in-cluster Postgres on
+#     emptyDir would lose every DAG run whenever the pod moved, which on a 2-node
+#     cluster is often.
+executor: KubernetesExecutor
+
+airflowVersion: "2.10.5"
+defaultAirflowTag: "2.10.5"
+
+postgresql:
+  enabled: false
+redis:
+  enabled: false
+flower:
+  enabled: false
+statsd:
+  enabled: false
+# No deferrable operators in the DAG, so the triggerer would idle for ~400Mi on a
+# cluster with two nodes.
+triggerer:
+  enabled: false
+
+data:
+  metadataSecretName: airflow-metadata
+
+webserverSecretKeySecretName: airflow-webserver-secret
+
+# The chart's default hooks run the migration before the metadata Secret exists when
+# the release is installed and the secret applied in the same pass. Running them as
+# ordinary Jobs keeps the ordering explicit.
+createUserJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+migrateDatabaseJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+
+# DAGs come straight from the repository — the same GitOps principle Argo CD applies
+# to the manifests. Nothing is baked into an image and no `kubectl cp` is involved;
+# a merge to main is the deploy.
+dags:
+  gitSync:
+    enabled: true
+    repo: https://github.com/sarthak-ad011/RealTime-Network-Anomaly-Detection.git
+    branch: main
+    subPath: pipelines/airflow/dags
+    # Chart 1.16.0 still renders this as git-sync's deprecated --wait; it logs a
+    # notice and maps it to --period itself. Setting `period` here instead is
+    # silently ignored by this chart version.
+    wait: 60
+
+# Read by pipelines/airflow/dags/retraining_loop.py. AWS_REGION is required because
+# boto3 picks up credentials from the node role via IMDS but will not infer a region
+# there — the same reason the inference Rollout sets it.
+env:
+  - name: PREDICTION_BUCKET
+    value: anomaly-mlops-artifacts-dev
+  - name: MLFLOW_TRACKING_URI
+    value: http://mlflow.mlops.svc.cluster.local:5000
+  - name: ANOMALY_IMAGE
+    value: 170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:553ec6c
+  - name: AWS_REGION
+    value: ap-south-1
+  - name: AWS_DEFAULT_REGION
+    value: ap-south-1
+
+config:
+  core:
+    # The demo DAG is triggered by hand; letting the scheduler backfill from
+    # start_date would queue a run for every 6h slot since January.
+    dags_are_paused_at_creation: 'True'
+    load_examples: 'False'
+  # Remote logging to S3 is deliberately left off: with KubernetesExecutor the task
+  # log lives in the worker pod, and the UI reads it live over the Kubernetes API
+  # while the pod exists. Shipping to S3 needs an `aws_default` connection that
+  # resolves a region, and a misconfigured one silently swallows task logs — the
+  # one thing you cannot afford to lose when a scheduled retrain fails at 3am.
+
+scheduler:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 768Mi
+    limits:
+      cpu: "1"
+      memory: 1536Mi
+
+webserver:
+  resources:
+    requests:
+      cpu: 150m
+      memory: 768Mi
+    limits:
+      cpu: "1"
+      memory: 1536Mi
+  defaultUser:
+    enabled: true
+    role: Admin
+    username: admin
+    email: admin@example.com
+    firstName: anomaly
+    lastName: mlops
+    password: admin
+
+workers:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
