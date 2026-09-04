@@ -6,6 +6,7 @@ Usage:
 """
 from __future__ import annotations
 
+import json
 import os
 import pickle
 from pathlib import Path
@@ -26,6 +27,18 @@ from src.models.lstm_autoencoder import LSTMConfig, LSTMDetector
 app = typer.Typer()
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MODEL_NAME = "network-anomaly-detector"
+
+# KubernetesPodOperator(do_xcom_push=True) mounts this dir and reads return.json
+# from it after the pod exits. The Airflow DAG pulls the run id from here to hand
+# the candidate to the promotion gate.
+XCOM_PATH = Path("/airflow/xcom/return.json")
+
+
+def _push_xcom(run_id: str) -> None:
+    if not XCOM_PATH.parent.is_dir():
+        return  # not running under Airflow — nothing to do
+    XCOM_PATH.write_text(json.dumps(run_id))
+    logger.info(f"pushed run id to XCom: {run_id}")
 
 
 @app.command()
@@ -67,6 +80,7 @@ def main(model: str = typer.Option(...), experiment: str = "default",
             mlflow.pytorch.log_model(det.model, "pytorch_model", registered_model_name=MODEL_NAME)
         else:
             raise typer.BadParameter(f"Unknown model: {model}")
+        _push_xcom(run.info.run_id)
         logger.info(f"Run {run.info.run_id} done: {metrics}")
 
 

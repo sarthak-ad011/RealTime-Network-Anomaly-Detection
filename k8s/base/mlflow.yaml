@@ -21,12 +21,17 @@ spec:
       containers:
         - name: mlflow
           image: ghcr.io/mlflow/mlflow:v2.14.1
-          command: ["mlflow", "server"]
+          # The upstream MLflow image ships without a Postgres driver or boto3, so it
+          # cannot reach the RDS backend store or the S3 artifact root as-is. Install
+          # both before starting the server.
+          command: ["/bin/sh", "-c"]
           args:
-            - --host=0.0.0.0
-            - --port=5000
-            - --backend-store-uri=$(BACKEND_URI)
-            - --default-artifact-root=$(ARTIFACT_ROOT)
+            - >-
+              pip install --no-cache-dir --quiet psycopg2-binary boto3 &&
+              exec mlflow server
+              --host=0.0.0.0 --port=5000
+              --backend-store-uri="$BACKEND_URI"
+              --default-artifact-root="$ARTIFACT_ROOT"
           env:
             - name: BACKEND_URI
               valueFrom:
@@ -40,13 +45,20 @@ spec:
                   key: artifact_root
           ports:
             - containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 512Mi
             limits:
-              cpu: 500m
-              memory: 1Gi
+              cpu: "1"
+              memory: 2Gi
 ---
 apiVersion: v1
 kind: Service

@@ -22,10 +22,17 @@ spec:
         - name: api
           image: PLACEHOLDER_ECR_URI/anomaly-mlops:v1
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8000
           env:
             - name: MLFLOW_TRACKING_URI
               value: http://mlflow:5000
+            # boto3 resolves credentials from the node role via IMDS but will not
+            # reliably infer a region there; without this the S3 client fails at import.
+            - name: AWS_REGION
+              value: ap-south-1
+            - name: AWS_DEFAULT_REGION
+              value: ap-south-1
             - name: PREDICTION_BUCKET
               valueFrom:
                 configMapKeyRef:
@@ -61,9 +68,6 @@ spec:
         - analysis:
             templates:
               - templateName: inference-health-check
-            args:
-              - name: service-name
-                value: anomaly-inference-canary
         - setWeight: 30
         - pause:
             duration: 2m

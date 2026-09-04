@@ -1,0 +1,22 @@
+# kube-prometheus-stack discovers scrape targets through PodMonitor/ServiceMonitor
+# CRDs, not the prometheus.io/scrape annotations on the pod template. Without this
+# the inference metrics never reach Prometheus and the canary AnalysisTemplate
+# evaluates against an empty result set.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: anomaly-inference
+  namespace: mlops
+  labels:
+    release: prom
+spec:
+  selector:
+    matchLabels:
+      app: anomaly-inference
+  # surfaces `rollouts_pod_template_hash` as a metric label for the canary analysis
+  podTargetLabels:
+    - rollouts-pod-template-hash
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

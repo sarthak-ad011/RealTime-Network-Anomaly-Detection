@@ -5,6 +5,7 @@ resources:
   - mlflow.yaml
   - inference-rollout.yaml
   - analysis-template.yaml
+  - podmonitor.yaml
 configMapGenerator:
   - name: mlops-config
     namespace: mlops

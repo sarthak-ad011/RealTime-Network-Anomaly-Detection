@@ -5,8 +5,15 @@ metadata:
   namespace: mlops
 spec:
   args:
-    - name: service-name
+    # Argo Rollouts injects the new ReplicaSet's pod-template-hash here. Every query
+    # below filters on it so the analysis measures ONLY the canary pods — an
+    # unscoped query averages the canary in with the healthy stable fleet and can
+    # let a broken canary pass.
+    - name: canary-hash
+      valueFrom:
+        podTemplateHashValue: Latest
   metrics:
+    # Standard SLO gate: the canary must stay fast.
     - name: p99-latency
       interval: 30s
       count: 4
@@ -18,9 +25,15 @@ spec:
           query: |
             histogram_quantile(0.99,
               sum by (le) (
-                rate(anomaly_prediction_latency_seconds_bucket{role="champion"}[2m])
+                rate(anomaly_prediction_latency_seconds_bucket{
+                  role="champion",
+                  rollouts_pod_template_hash="{{args.canary-hash}}"
+                }[2m])
               )
             )
+    # ML-specific gate: a model can be fast and healthy by every infra measure while
+    # being behaviourally broken — e.g. flagging every flow as an attack. Guard the
+    # prediction distribution itself, not just latency and error rate.
     - name: anomaly-flag-rate
       interval: 30s
       count: 4
@@ -30,6 +43,14 @@ spec:
         prometheus:
           address: http://prom-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
           query: |
-            sum(rate(anomaly_predictions_total{is_anomaly="1"}[2m]))
+            sum(rate(anomaly_predictions_total{
+              is_anomaly="1",
+              rollouts_pod_template_hash="{{args.canary-hash}}"
+            }[2m]))
             /
-            sum(rate(anomaly_predictions_total[2m]))
+            clamp_min(
+              sum(rate(anomaly_predictions_total{
+                rollouts_pod_template_hash="{{args.canary-hash}}"
+              }[2m])),
+              0.001
+            )
