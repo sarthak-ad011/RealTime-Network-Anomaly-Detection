@@ -1,0 +1,36 @@
+# Drift detection run as a one-shot Job. This is the same container and entrypoint
+# the Airflow DAG schedules via KubernetesPodOperator every 6h
+# (pipelines/airflow/dags/retraining_loop.py) — running it directly proves the step
+# without waiting for a scheduler tick.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: drift-check
+  namespace: mlops
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: anomaly-sa
+      containers:
+        - name: drift
+          image: IMAGE_PLACEHOLDER
+          command: ["python", "-m", "src.drift.detect"]
+          env:
+            - name: PREDICTION_BUCKET
+              value: anomaly-mlops-artifacts-dev
+            - name: DRIFT_THRESHOLD
+              value: "0.5"
+            - name: AWS_REGION
+              value: ap-south-1
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi

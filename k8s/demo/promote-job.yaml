@@ -1,0 +1,55 @@
+# Champion/challenger promotion gate as a one-shot Job — the same step the Airflow
+# DAG runs after a retrain. Evaluates the candidate run against the incumbent and
+# only promotes if AUC-PR improves AND recall does not regress AND F1 holds.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: promotion-gate
+  namespace: mlops
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: anomaly-sa
+      containers:
+        - name: promote
+          image: IMAGE_PLACEHOLDER
+          command: ["python", "-c"]
+          args:
+            - |
+              import os
+              from mlflow.tracking import MlflowClient
+              from src.training.evaluate import should_promote
+              c = MlflowClient(os.environ["MLFLOW_TRACKING_URI"])
+              name = "network-anomaly-detector"
+              vs = sorted(c.search_model_versions(f"name='{name}'"), key=lambda v: int(v.version))
+              champ = next((v for v in vs if v.current_stage == "Production"), None)
+              cand  = next((v for v in vs if v.current_stage == "Staging"), None)
+              cm = c.get_run(champ.run_id).data.metrics if champ else None
+              dm = c.get_run(cand.run_id).data.metrics
+              print(f"champion  v{champ.version}: auc_pr={cm['auc_pr']:.4f} recall={cm['recall']:.4f} f1={cm['f1']:.4f}")
+              print(f"candidate v{cand.version}: auc_pr={dm['auc_pr']:.4f} recall={dm['recall']:.4f} f1={dm['f1']:.4f}")
+              ok, reason = should_promote(dm, cm)
+              print(f"\nPROMOTE: {ok}  ({reason})")
+              if ok:
+                  c.transition_model_version_stage(name, champ.version, "Archived")
+                  c.transition_model_version_stage(name, cand.version, "Production")
+                  print(f"promoted v{cand.version} to Production")
+              else:
+                  print("candidate rejected; champion retained")
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: http://mlflow.mlops.svc.cluster.local:5000
+            - name: AWS_REGION
+              value: ap-south-1
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi

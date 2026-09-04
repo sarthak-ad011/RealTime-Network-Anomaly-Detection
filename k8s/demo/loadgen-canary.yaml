@@ -1,21 +1,23 @@
-# In-cluster load generator. Applied manually for demos, deliberately NOT part of the
-# Argo CD application: it is a test harness, not part of the deployed system.
-# Talks to the ClusterIP Service so requests are balanced across every replica —
-# `kubectl port-forward` pins to a single pod and would leave the others idle.
+# Drives the CANARY Service. Argo Rollouts scopes the stable and canary Services by
+# pod-template-hash, and this Rollout has no traffic router (no ingress or service
+# mesh), so setWeight scales replicas rather than splitting traffic. Without a client
+# aimed at the canary Service the new pods stay idle and the AnalysisTemplate
+# evaluates an empty result set. In production an ingress controller would perform
+# this weighting for real.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: loadgen
+  name: loadgen-canary
   namespace: mlops
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: loadgen
+      app: loadgen-canary
   template:
     metadata:
       labels:
-        app: loadgen
+        app: loadgen-canary
     spec:
       serviceAccountName: anomaly-sa
       containers:
@@ -23,9 +25,9 @@ spec:
           image: 170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:4ae4691
           command: ["python", "traffic_generator/generator.py"]
           args:
-            - --endpoint=http://anomaly-inference-stable.mlops.svc.cluster.local
+            - --endpoint=http://anomaly-inference-canary.mlops.svc.cluster.local
             - --mode=attack
-            - --rps=25
+            - --rps=10
             - --attack-rate=0.06
             - --reference=s3://anomaly-mlops-artifacts-dev/reference/training_reference.parquet
           env:

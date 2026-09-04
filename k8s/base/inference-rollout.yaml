@@ -69,6 +69,10 @@ spec:
         - analysis:
             templates:
               - templateName: inference-health-check
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
         - setWeight: 30
         - pause:
             duration: 2m

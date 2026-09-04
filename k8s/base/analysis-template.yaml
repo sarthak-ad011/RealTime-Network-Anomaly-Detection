@@ -5,13 +5,14 @@ metadata:
   namespace: mlops
 spec:
   args:
-    # Argo Rollouts injects the new ReplicaSet's pod-template-hash here. Every query
-    # below filters on it so the analysis measures ONLY the canary pods — an
-    # unscoped query averages the canary in with the healthy stable fleet and can
-    # let a broken canary pass.
+    # Declared here, supplied by the Rollout's analysis step via
+    # valueFrom.podTemplateHashValue. Declaring valueFrom on the template itself
+    # does not populate it — the analysis then errors with "argument canary-hash
+    # was not supplied" and Argo Rollouts aborts the canary for a config fault
+    # rather than a real signal. Every query below filters on this so the analysis
+    # measures ONLY canary pods; an unscoped query averages the canary in with the
+    # healthy stable fleet and can let a broken canary pass.
     - name: canary-hash
-      valueFrom:
-        podTemplateHashValue: Latest
   metrics:
     # Standard SLO gate: the canary must stay fast.
     - name: p99-latency
