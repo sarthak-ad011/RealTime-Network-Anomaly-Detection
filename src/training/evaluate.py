@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+
 from loguru import logger
 
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow.mlops:5000")

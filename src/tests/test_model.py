@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from src.models.isolation_forest import IsolationForestDetector, IFConfig
-from src.models.lstm_autoencoder import LSTMDetector, LSTMConfig
+from src.models.isolation_forest import IFConfig, IsolationForestDetector
+from src.models.lstm_autoencoder import LSTMConfig, LSTMDetector
 
 
 @pytest.fixture

@@ -1,58 +1,107 @@
-"""Drift detection job. Compares last 24h of predictions to the training reference.
-Writes a marker to S3 if drift exceeds threshold. Runs as an Airflow task."""
+"""Drift detection job. Compares recent live predictions to the training reference.
+
+Writes a marker to S3 when the share of drifted feature columns exceeds the
+threshold; the Airflow DAG branches on that marker to trigger retraining.
+Runs as a KubernetesPodOperator task (see pipelines/airflow/dags/retraining_loop.py).
+"""
 from __future__ import annotations
 
-import os
+import io
 import json
-from datetime import datetime, timedelta, timezone
+import os
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 
 import boto3
 import pandas as pd
-from evidently.report import Report
-from evidently.metric_preset import DataDriftPreset
+from evidently import DataDefinition, Dataset, Report
+from evidently.presets import DataDriftPreset
 from loguru import logger
 
 from src.data.loader import FEATURE_COLS
 
 BUCKET = os.getenv("PREDICTION_BUCKET", "anomaly-mlops-artifacts-dev")
 THRESHOLD = float(os.getenv("DRIFT_THRESHOLD", "0.5"))
+REFERENCE_KEY = os.getenv("REFERENCE_KEY", "reference/training_reference.parquet")
+MARKER_KEY = os.getenv("DRIFT_MARKER_KEY", "drift/drift_detected.json")
+MAX_OBJECTS = int(os.getenv("DRIFT_MAX_OBJECTS", "20000"))
+MIN_ROWS = int(os.getenv("DRIFT_MIN_ROWS", "100"))
+
 s3 = boto3.client("s3")
 
 
-def load_recent(hours=24):
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    rows = []
-    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix="predictions/"):
+def _read_record(key):
+    try:
+        body = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
+        rec = json.loads(body)
+        return dict(zip(rec["feature_names"], rec["features"], strict=True))
+    except Exception as exc:  # a single unreadable record must not kill the job
+        logger.warning(f"skipping {key}: {exc}")
+        return None
+
+
+def load_recent(hours: int = 24) -> pd.DataFrame:
+    """Fetch prediction records written in the last `hours` from S3."""
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    keys = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BUCKET, Prefix="predictions/"):
         for obj in page.get("Contents", []):
-            if obj["LastModified"] < cutoff:
-                continue
-            body = s3.get_object(Bucket=BUCKET, Key=obj["Key"])["Body"].read()
-            rec = json.loads(body)
-            rows.append(dict(zip(rec["feature_names"], rec["features"])))
+            if obj["LastModified"] >= cutoff:
+                keys.append(obj["Key"])
+        if len(keys) >= MAX_OBJECTS:
+            logger.warning(f"capping at {MAX_OBJECTS} prediction objects")
+            keys = keys[:MAX_OBJECTS]
+            break
+    # one GET per record: fan out so a few thousand objects don't take minutes
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        rows = [r for r in pool.map(_read_record, keys) if r is not None]
     df = pd.DataFrame(rows)
-    logger.info(f"loaded {len(df)} recent predictions")
+    logger.info(f"loaded {len(df)} recent predictions from {len(keys)} objects")
     return df
+
+
+def load_reference() -> pd.DataFrame:
+    body = s3.get_object(Bucket=BUCKET, Key=REFERENCE_KEY)["Body"].read()
+    return pd.read_parquet(io.BytesIO(body))
+
+
+def compute_drift(reference: pd.DataFrame, current: pd.DataFrame) -> dict:
+    """Run the Evidently drift preset and return a flat summary."""
+    common = [c for c in FEATURE_COLS if c in reference.columns and c in current.columns]
+    if not common:
+        raise RuntimeError("no overlapping feature columns between reference and current")
+    definition = DataDefinition(numerical_columns=common)
+    ref_ds = Dataset.from_pandas(reference[common], data_definition=definition)
+    cur_ds = Dataset.from_pandas(current[common], data_definition=definition)
+    snapshot = Report([DataDriftPreset()]).run(cur_ds, ref_ds)
+
+    counts = next(
+        m for m in snapshot.dict()["metrics"]
+        if m["config"]["type"].endswith("DriftedColumnsCount")
+    )["value"]
+    return {
+        "number_of_columns": len(common),
+        "number_of_drifted_columns": int(counts["count"]),
+        "share_of_drifted_columns": float(counts["share"]),
+        "dataset_drift": bool(float(counts["share"]) > THRESHOLD),
+    }
 
 
 def main():
     current = load_recent()
-    if len(current) < 100:
-        logger.info("not enough recent predictions; skipping")
+    if len(current) < MIN_ROWS:
+        logger.info(f"only {len(current)} recent predictions (< {MIN_ROWS}); skipping")
         return
-    ref = pd.read_parquet(
-        s3.get_object(Bucket=BUCKET, Key="reference/training_reference.parquet")["Body"])
-    common = [c for c in FEATURE_COLS if c in ref.columns and c in current.columns]
-    report = Report(metrics=[DataDriftPreset()])
-    report.run(reference_data=ref[common], current_data=current[common])
-    summary = report.as_dict()["metrics"][0]["result"]
+    summary = compute_drift(load_reference(), current)
     logger.info(f"drift summary: {summary}")
-    if summary["share_of_drifted_columns"] > THRESHOLD:
-        s3.put_object(Bucket=BUCKET, Key="drift/drift_detected.json",
-                      Body=json.dumps({"detected_at": datetime.now(timezone.utc).isoformat(),
-                                       **{k: summary[k] for k in
-                                          ["number_of_columns", "number_of_drifted_columns",
-                                           "share_of_drifted_columns", "dataset_drift"]}}).encode())
-        logger.warning("drift marker written")
+    if summary["dataset_drift"]:
+        marker = {"detected_at": datetime.now(UTC).isoformat(), **summary}
+        s3.put_object(Bucket=BUCKET, Key=MARKER_KEY, Body=json.dumps(marker).encode())
+        logger.warning(
+            f"drift marker written: {summary['number_of_drifted_columns']}"
+            f"/{summary['number_of_columns']} columns drifted"
+        )
     else:
         logger.info("no significant drift")
 

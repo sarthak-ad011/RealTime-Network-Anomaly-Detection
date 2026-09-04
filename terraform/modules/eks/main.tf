@@ -93,11 +93,16 @@ resource "aws_iam_role_policy_attachment" "cluster_policy" {
 resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
   role_arn = aws_iam_role.cluster.arn
-  version  = "1.30"
+  version  = var.cluster_version
   vpc_config {
     subnet_ids              = concat(aws_subnet.private[*].id, aws_subnet.public[*].id)
     endpoint_private_access = true
     endpoint_public_access  = true
+  }
+  # Grant the identity running Terraform cluster-admin so kubectl works right after apply.
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
   }
   depends_on = [aws_iam_role_policy_attachment.cluster_policy]
 }
@@ -107,12 +112,12 @@ resource "aws_eks_node_group" "general" {
   node_group_name = "general"
   node_role_arn   = var.node_role_arn
   subnet_ids      = aws_subnet.private[*].id
-  instance_types  = ["t3.small"]
+  instance_types  = var.general_instance_types
   capacity_type   = "ON_DEMAND"
   scaling_config {
-    desired_size = 2
-    max_size     = 4
-    min_size     = 2
+    desired_size = var.general_desired_size
+    max_size     = var.general_max_size
+    min_size     = var.general_min_size
   }
   labels = { workload = "general" }
 }
@@ -122,7 +127,7 @@ resource "aws_eks_node_group" "spot" {
   node_group_name = "spot-batch"
   node_role_arn   = var.node_role_arn
   subnet_ids      = aws_subnet.private[*].id
-  instance_types  = ["t3.small"]
+  instance_types  = var.spot_instance_types
   capacity_type   = "SPOT"
   scaling_config {
     desired_size = 1

@@ -1,11 +1,12 @@
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-from sklearn.metrics import average_precision_score, roc_auc_score, precision_recall_fscore_support
 from loguru import logger
+from sklearn.metrics import average_precision_score, precision_recall_fscore_support, roc_auc_score
+from torch.utils.data import DataLoader, TensorDataset
 
 
 @dataclass
@@ -62,7 +63,8 @@ class LSTMDetector:
                 batch = batch.to(self.cfg.device)
                 opt.zero_grad()
                 loss = loss_fn(self.model(batch), batch)
-                loss.backward(); opt.step()
+                loss.backward()
+                opt.step()
                 total += loss.item() * batch.size(0)
             logger.info(f"epoch {epoch+1}/{self.cfg.epochs} loss={total/len(ds):.5f}")
         val_scores = self.score(X_val)
@@ -71,17 +73,25 @@ class LSTMDetector:
 
     @torch.no_grad()
     def score(self, X):
+        """Per-sample reconstruction error. Batched — a single forward pass over a
+        full test split would allocate tens of GB of LSTM activations."""
         self.model.eval()
-        x = self._to_seq(X).to(self.cfg.device)
-        recon = self.model(x)
-        return ((recon - x) ** 2).mean(dim=(1, 2)).cpu().numpy()
+        chunk = max(self.cfg.batch_size * 8, 1024)
+        out = []
+        for i in range(0, len(X), chunk):
+            x = self._to_seq(X[i:i + chunk]).to(self.cfg.device)
+            recon = self.model(x)
+            out.append(((recon - x) ** 2).mean(dim=(1, 2)).cpu().numpy())
+        return np.concatenate(out) if out else np.empty(0, dtype=np.float32)
 
     def predict(self, X, threshold=None):
         thr = threshold if threshold is not None else self.threshold
         return (self.score(X) > thr).astype(int)
 
     def evaluate(self, X, y):
-        scores, preds = self.score(X), self.predict(X)
+        # score once and reuse — predict() would otherwise re-run the whole forward pass
+        scores = self.score(X)
+        preds = (scores > self.threshold).astype(int)
         p, r, f1, _ = precision_recall_fscore_support(y, preds, average="binary", zero_division=0)
         return {"auc_roc": float(roc_auc_score(y, scores)),
                 "auc_pr": float(average_precision_score(y, scores)),

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-import numpy as np
+
 from sklearn.ensemble import IsolationForest
-from sklearn.metrics import average_precision_score, roc_auc_score, precision_recall_fscore_support
+from sklearn.metrics import average_precision_score, precision_recall_fscore_support, roc_auc_score
 
 
 @dataclass
@@ -19,7 +19,8 @@ class IsolationForestDetector:
             random_state=cfg.random_state, n_jobs=-1)
 
     def fit(self, X):
-        self.model.fit(X); return self
+        self.model.fit(X)
+        return self
 
     def score(self, X):
         return -self.model.decision_function(X)
@@ -28,7 +29,10 @@ class IsolationForestDetector:
         return (self.model.predict(X) == -1).astype(int)
 
     def evaluate(self, X, y):
-        scores, preds = self.score(X), self.predict(X)
+        # score once; sklearn flags an outlier exactly where decision_function < 0,
+        # which is score > 0 under our sign flip. Avoids a second full tree traversal.
+        scores = self.score(X)
+        preds = (scores > 0).astype(int)
         p, r, f1, _ = precision_recall_fscore_support(y, preds, average="binary", zero_division=0)
         return {"auc_roc": float(roc_auc_score(y, scores)),
                 "auc_pr": float(average_precision_score(y, scores)),

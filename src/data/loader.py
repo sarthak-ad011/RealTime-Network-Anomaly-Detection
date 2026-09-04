@@ -45,6 +45,13 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     before = len(df)
     df = df.dropna(subset=FEATURE_COLS + [LABEL_COL])
     logger.info(f"Dropped {before - len(df)} rows with NaN/inf")
+
+    # CIC-IDS2017 carries a small number of flows with a negative duration — a
+    # capture-timestamp artifact, not real traffic. ~115 rows (0.004%), all benign.
+    before = len(df)
+    df = df[df["Flow Duration"] >= 0].copy()
+    logger.info(f"Dropped {before - len(df)} rows with negative Flow Duration")
+
     df["label_binary"] = (df[LABEL_COL].str.strip() != "BENIGN").astype(int)
     return df
 

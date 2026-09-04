@@ -1,0 +1,92 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'requirements.txt'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'requirements.txt'
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: anomaly-mlops
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff
+      - name: Lint (ruff)
+        run: ruff check src/
+      - name: Run tests (pytest)
+        run: pytest src/tests -v --maxfail=1
+
+  build-and-push:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Compute image ref (git SHA)
+        id: meta
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          echo "image=${REGISTRY}/${ECR_REPOSITORY}:${SHA}" >> "$GITHUB_OUTPUT"
+      - name: Build and push
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          docker build -f src/serving/Dockerfile -t "$IMAGE" .
+          docker push "$IMAGE"
+
+  update-manifest:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update image tag in Rollout manifest
+        env:
+          IMAGE: ${{ needs.build-and-push.outputs.image }}
+        run: |
+          yq -i '(.spec.template.spec.containers[] | select(.name == "api") | .image) = strenv(IMAGE)' \
+            k8s/base/inference-rollout.yaml
+      - name: Commit and push the bump
+        env:
+          IMAGE: ${{ needs.build-and-push.outputs.image }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/base/inference-rollout.yaml
+          git commit -m "ci: deploy ${IMAGE} [skip ci]" || { echo "no change"; exit 0; }
+          git push

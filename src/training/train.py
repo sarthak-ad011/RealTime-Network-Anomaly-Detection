@@ -6,8 +6,6 @@ Usage:
 """
 from __future__ import annotations
 
-import src.log_config  # noqa: F401 — activate file logging
-
 import os
 import pickle
 from pathlib import Path
@@ -19,10 +17,11 @@ import torch
 import typer
 from loguru import logger
 
-from src.data.loader import load_raw, clean, prepare, FEATURE_COLS
+import src.log_config  # noqa: F401 — activate file logging
+from src.data.loader import FEATURE_COLS, clean, load_raw, prepare
 from src.data.validation import validate
-from src.models.isolation_forest import IsolationForestDetector, IFConfig
-from src.models.lstm_autoencoder import LSTMDetector, LSTMConfig
+from src.models.isolation_forest import IFConfig, IsolationForestDetector
+from src.models.lstm_autoencoder import LSTMConfig, LSTMDetector
 
 app = typer.Typer()
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")

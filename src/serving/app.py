@@ -6,8 +6,6 @@ is logged to S3 for drift detection.
 """
 from __future__ import annotations
 
-import src.log_config  # noqa: F401 — activate file logging
-
 import asyncio
 import json
 import os
@@ -15,7 +13,7 @@ import pickle
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import boto3
@@ -23,10 +21,11 @@ import mlflow
 import numpy as np
 import torch
 from fastapi import FastAPI, HTTPException
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
+import src.log_config  # noqa: F401 — activate file logging
 from src.data.loader import FEATURE_COLS
 from src.models.lstm_autoencoder import LSTMAutoencoder, LSTMConfig
 
@@ -158,7 +157,7 @@ async def predict(req: PredictionRequest):
     PREDICTION_COUNTER.labels("champion", str(int(label))).inc()
     PREDICTION_LATENCY.labels("champion").observe(latency)
     SCORE_HISTOGRAM.labels("champion").observe(score)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = {
         "request_id": request_id, "timestamp": now.isoformat(),
         "date": now.strftime("%Y-%m-%d"), "features": req.features,

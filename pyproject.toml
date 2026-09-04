@@ -1,0 +1,16 @@
+[tool.ruff]
+# Pinned explicitly so local runs and CI lint identically, regardless of any
+# ruff config that happens to sit in a parent directory.
+line-length = 110
+target-version = "py311"
+extend-exclude = [".venv", "mlruns", "notebooks", "data", "checkpoints"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501", # long lines are tolerated in config-ish literals and log format strings
+    "B008", # typer.Option(...) in a default is the documented Typer idiom
+]
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]
