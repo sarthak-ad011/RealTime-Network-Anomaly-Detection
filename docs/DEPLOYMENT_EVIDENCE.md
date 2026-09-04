@@ -247,6 +247,55 @@ Two things changed as a result:
    at it — the diagnosis above had to be reproduced by hand in the scheduler. That is
    not a workable position for a pipeline that retrains unattended every six hours.
 
+### After both fixes
+
+The scheduler now assumes the IRSA role rather than finding no credentials:
+
+```
+identity: arn:aws:sts::170420138680:assumed-role/anomaly-mlops-irsa-dev/botocore-session-1788525548
+marker:   {'detected_at': '2026-09-04T11:51:13.423493+00:00', 'number_of_columns': 15,
+           'number_of_drifted_columns': 15, 'share_of_drifted_columns': 1.0,
+           'dataset_drift': True}
+age: 0:47:55 -> RESULT: retrain
+```
+
+That marker timestamp is worth reading twice: `11:51:13` is the *in-cluster*
+`drift_check` task writing it, not the local run in section 5. Drift detection ran end
+to end inside the cluster on the fixed image.
+
+Run `evidence-run-1` then reached the branch decision:
+
+```
+task_id      | state
+drift_check  | success
+branch       | success
+skip         | skipped      <- branch chose the retraining path, not skip
+retrain      | failed
+```
+
+And task logs now survive their pods:
+
+```
+airflow-logs/dag_id=anomaly_retraining_loop/run_id=evidence-run-1/task_id=drift_check/attempt=1.log
+airflow-logs/dag_id=anomaly_retraining_loop/run_id=evidence-run-1/task_id=branch/attempt=1.log
+airflow-logs/dag_id=anomaly_retraining_loop/run_id=evidence-run-1/task_id=retrain/attempt=1.log
+```
+
+### The retrain leg does not run here, and this is why
+
+`retrain` fails, deliberately reported rather than hidden:
+
+```
+FileNotFoundError: No CSVs in data/raw
+airflow.exceptions.AirflowException: Pod retrain-sgz6hdhi returned a failure.
+```
+
+`src/data/loader.py:load_raw()` globs a local directory. The 844MB CIC-IDS2017 CSVs are
+not baked into the image and are not staged in S3, so the task pod has nothing to train
+on. Closing this means uploading the raw data and teaching the loader to read `s3://` —
+it is the first item on the roadmap. Every stage up to and including the branch decision
+is live; the retrain and promote legs are wired but unexercised in this deployment.
+
 ---
 
 ## 9. Environment

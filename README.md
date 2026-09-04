@@ -14,6 +14,19 @@ End-to-end MLOps platform that detects anomalous network traffic in real time an
 
 ---
 
+## Demo
+
+<!-- Replace the URL below once the walkthrough is uploaded. -->
+**▶ [3-minute walkthrough](ADD_VIDEO_URL_HERE)** — drift detection on live traffic, the
+canary gate catching a behaviourally broken model, and automatic rollback.
+
+The shot list, the exact commands, and an explicit note on which claims the footage
+does and does not support are in [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md).
+Measured results from a real deployment are in
+[`docs/DEPLOYMENT_EVIDENCE.md`](docs/DEPLOYMENT_EVIDENCE.md).
+
+---
+
 ## Why this project
 
 Most anomaly detectors are trained once and silently decay as attack patterns and traffic evolve. This platform closes that loop: it detects when its own predictions drift, retrains on recent data, and promotes the new model **only if it beats the current one without regressing recall** — because in security, a missed attack costs more than a false alarm. The whole system is infrastructure-as-code and reproducible from scratch in ~25 minutes.
