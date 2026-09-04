@@ -40,3 +40,55 @@ resource "aws_iam_role_policy" "node_s3" {
 }
 
 output "eks_node_role_arn" { value = aws_iam_role.eks_node.arn }
+# ---------------------------------------------------------------------------
+# IRSA role for the mlops workloads (inference, MLflow, drift, training pods).
+# Trusted only by one Kubernetes service account, and scoped to the artifacts
+# bucket — a far tighter grant than sharing the node role via IMDS.
+# ---------------------------------------------------------------------------
+variable "oidc_provider_arn" { type = string }
+variable "oidc_provider_url" { type = string }
+variable "service_account" {
+  type        = string
+  default     = "system:serviceaccount:mlops:anomaly-sa"
+  description = "The only principal allowed to assume this role."
+}
+
+resource "aws_iam_role" "irsa_mlops" {
+  name = "anomaly-mlops-irsa-${var.environment}"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Federated = var.oidc_provider_arn }
+      Action    = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "${var.oidc_provider_url}:aud" = "sts.amazonaws.com"
+          "${var.oidc_provider_url}:sub" = var.service_account
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "irsa_s3" {
+  name = "irsa-s3-access"
+  role = aws_iam_role.irsa_mlops.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = "${var.s3_bucket}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket", "s3:GetBucketLocation"]
+        Resource = var.s3_bucket
+      }
+    ]
+  })
+}
+
+output "irsa_role_arn" { value = aws_iam_role.irsa_mlops.arn }

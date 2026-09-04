@@ -28,9 +28,11 @@ module "ecr" {
 }
 
 module "iam" {
-  source      = "../../modules/iam"
-  environment = var.environment
-  s3_bucket   = module.s3.artifacts_bucket_arn
+  source            = "../../modules/iam"
+  environment       = var.environment
+  s3_bucket         = module.s3.artifacts_bucket_arn
+  oidc_provider_arn = module.eks.oidc_provider_arn
+  oidc_provider_url = module.eks.oidc_provider_url
 }
 
 module "eks" {
@@ -60,6 +62,7 @@ output "cluster_endpoint" { value = module.eks.cluster_endpoint }
 output "ecr_repository_url" { value = module.ecr.repository_url }
 output "github_actions_role_arn" { value = module.github_oidc.role_arn }
 output "artifacts_bucket" { value = module.s3.artifacts_bucket_name }
+output "irsa_role_arn" { value = module.iam.irsa_role_arn }
 output "mlflow_db_endpoint" {
   value     = module.rds.endpoint
   sensitive = true

@@ -84,7 +84,10 @@ jobs:
         env:
           IMAGE: ${{ needs.build-and-push.outputs.image }}
         run: |
-          yq -i '(.spec.template.spec.containers[] | select(.name == "api") | .image) = strenv(IMAGE)' \
+          # Filter on .kind FIRST. yq auto-creates any path it traverses, so an
+          # expression starting at .spec.template on this multi-document file
+          # injects an empty template block into the two Service documents.
+          yq -i '(select(.kind == "Rollout").spec.template.spec.containers[] | select(.name == "api")).image = strenv(IMAGE)' \
             k8s/base/inference-rollout.yaml
       - name: Commit and push the bump
         env:

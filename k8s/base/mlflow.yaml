@@ -18,6 +18,7 @@ spec:
       labels:
         app: mlflow
     spec:
+      serviceAccountName: anomaly-sa
       containers:
         - name: mlflow
           image: ghcr.io/mlflow/mlflow:v2.14.1

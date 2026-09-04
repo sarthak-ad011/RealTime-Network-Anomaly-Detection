@@ -141,3 +141,21 @@ resource "aws_eks_node_group" "spot" {
     effect = "NO_SCHEDULE"
   }
 }
+# ---------------------------------------------------------------------------
+# IRSA: IAM Roles for Service Accounts
+#
+# EKS managed node groups set the IMDS hop limit to 1, so a container cannot
+# reach the instance metadata service and therefore cannot borrow the node
+# role's credentials. Rather than widening IMDS (which would hand the node
+# role to every pod on the box), register the cluster's OIDC issuer so
+# individual service accounts can assume narrowly-scoped roles.
+# ---------------------------------------------------------------------------
+data "tls_certificate" "cluster_oidc" {
+  url = aws_eks_cluster.main.identity[0].oidc[0].issuer
+}
+
+resource "aws_iam_openid_connect_provider" "cluster" {
+  url             = aws_eks_cluster.main.identity[0].oidc[0].issuer
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.cluster_oidc.certificates[0].sha1_fingerprint]
+}
