@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: 170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:c970f09
+          image: 170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:26311a4
           ports:
             - name: http
               containerPort: 8000
@@ -87,6 +87,9 @@ spec:
   ports:
     - port: 80
       targetPort: 8000
+  template:
+    spec:
+      containers: []
 ---
 apiVersion: v1
 kind: Service
@@ -99,3 +102,6 @@ spec:
   ports:
     - port: 80
       targetPort: 8000
+  template:
+    spec:
+      containers: []
