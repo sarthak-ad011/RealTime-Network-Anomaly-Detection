@@ -2,7 +2,7 @@
 # Pinned explicitly so local runs and CI lint identically, regardless of any
 # ruff config that happens to sit in a parent directory.
 line-length = 110
-target-version = "py311"
+target-version = "py313"
 extend-exclude = [".venv", "mlruns", "notebooks", "data", "checkpoints"]
 
 [tool.ruff.lint]

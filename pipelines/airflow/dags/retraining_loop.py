@@ -10,7 +10,7 @@ from airflow.operators.python import BranchPythonOperator, PythonOperator
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 
 BUCKET = os.getenv("PREDICTION_BUCKET", "anomaly-mlops-artifacts-dev")
-IMAGE = os.getenv("ANOMALY_IMAGE", "PLACEHOLDER_ECR_URI/anomaly-mlops:latest")
+IMAGE = os.getenv("ANOMALY_IMAGE", "170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:c970f09")
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow.mlops.svc.cluster.local:5000")
 MARKER_KEY = "drift/drift_detected.json"
 

@@ -15,6 +15,13 @@ CLUSTER="${CLUSTER_NAME:-anomaly-dev}"
 : "${TF_VAR_db_password:?export TF_VAR_db_password (same value used for terraform apply)}"
 
 echo "==> kubeconfig for $CLUSTER"
+# Some resolvers fail specifically on eks.<region>.amazonaws.com while every other
+# AWS endpoint resolves. AWS publishes a dual-stack endpoint for the same API, so
+# fall back to it rather than failing the whole bootstrap.
+if ! aws eks describe-cluster --name "$CLUSTER" --region "$REGION" >/dev/null 2>&1; then
+  echo "    standard EKS endpoint unreachable; retrying via dual-stack"
+  export AWS_USE_DUALSTACK_ENDPOINT=true
+fi
 aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION" >/dev/null
 kubectl get nodes
 
@@ -27,7 +34,9 @@ kubectl create secret generic mlflow-db -n mlops \
 
 echo "==> Argo Rollouts"
 kubectl create namespace argo-rollouts --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n argo-rollouts -f \
+# --server-side: these CRD schemas blow past the 262144-byte annotation limit that
+# client-side apply imposes via last-applied-configuration.
+kubectl apply --server-side --force-conflicts -n argo-rollouts -f \
   https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
 
 echo "==> kube-prometheus-stack (monitoring)"
@@ -44,7 +53,7 @@ helm upgrade --install prom prometheus-community/kube-prometheus-stack \
 
 echo "==> Argo CD"
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n argocd -f \
+kubectl apply --server-side --force-conflicts -n argocd -f \
   https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
 echo "==> waiting for control planes to become ready"

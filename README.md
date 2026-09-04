@@ -164,7 +164,33 @@ aws eks update-kubeconfig --name anomaly-dev --region ap-south-1
 
 ## Model
 
-The core model is an **LSTM autoencoder** trained only on benign network flows. It learns to reconstruct normal traffic; the reconstruction error becomes the anomaly score, with the threshold set at the 95th percentile of validation errors. This unsupervised framing means it flags attack types it never saw in training — a key advantage over a supervised classifier on a dataset where attacks are <1% of traffic.
+The core model is an **LSTM autoencoder** trained only on benign network flows. It learns to reconstruct normal traffic; the reconstruction error becomes the anomaly score, with the threshold set at the 95th percentile of validation errors. This unsupervised framing means it flags attack types it never saw in training, without needing labelled examples of them.
+
+### Results
+
+Measured on a held-out 20% stratified test split (565,553 flows, 19.7% attacks) of the
+full CIC-IDS2017 dataset. The autoencoder was trained on benign flows only
+(1,589,843 samples), 20 epochs, threshold at the 95th percentile of validation
+reconstruction error.
+
+| Model | AUC-PR | AUC-ROC | Precision | Recall | F1 |
+|---|---|---|---|---|---|
+| **LSTM autoencoder** | **0.632** | 0.773 | 0.992 | 0.253 | 0.403 |
+| Isolation Forest (baseline) | 0.336 | 0.663 | 0.059 | 0.003 | 0.006 |
+
+**AUC-PR is the headline number**: with a 19.7% positive class and a detector that must
+not drown analysts in false positives, average precision reflects real operating quality
+far better than accuracy or ROC-AUC. The autoencoder nearly doubles the baseline
+(+0.296 AUC-PR).
+
+The precision/recall split is the interesting part. At the 95th-percentile threshold the
+autoencoder is highly conservative — **99.2% of what it flags is a genuine attack**, but it
+catches only 25% of them. That threshold is a deployment choice, not a property of the
+model: AUC-PR summarises the whole curve, and `ANOMALY_THRESHOLD_SCALE` moves the
+operating point at deploy time without retraining. The Isolation Forest baseline, fixed at
+`contamination=0.01` while attacks are ~20% of traffic, is badly mis-calibrated by
+comparison — which is precisely why the promotion gate scores candidates on AUC-PR
+rather than on any single-threshold metric.
 
 An **Isolation Forest** serves as the baseline. The training pipeline logs both to MLflow with full metrics (AUC-PR, recall, precision, F1) so promotion decisions are grounded in the metric that matters for imbalanced anomaly detection: **AUC-PR**, not accuracy.
 
@@ -172,7 +198,9 @@ An **Isolation Forest** serves as the baseline. The training pipeline logs both 
 
 ## Dataset
 
-[CIC-IDS2017](https://www.unb.ca/cic/datasets/ids-2017.html) from the Canadian Institute for Cybersecurity — ~2.8M labeled network flows including DDoS, brute force, port scans, web attacks, and infiltration. The data is versioned with DVC and is not committed to the repo (see `.gitignore`).
+[CIC-IDS2017](https://www.unb.ca/cic/datasets/ids-2017.html) from the Canadian Institute for Cybersecurity. After cleaning (dropping NaN/inf rows and 115 flows with a negative `Flow Duration` — a capture-timestamp artifact), the pipeline uses **2,827,761 labelled flows**, of which **19.7% are attacks** (DDoS, brute force, port scans, web attacks, infiltration). 15 flow-statistics features are used; see `src/data/loader.py`.
+
+The autoencoder trains on benign flows only (1.59M after the split), so the 19.7% attack share is what the *evaluation* set contains, not the training set. Raw CSVs are not committed to the repo (see `.gitignore`).
 
 ---
 

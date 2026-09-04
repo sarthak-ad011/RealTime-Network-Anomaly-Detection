@@ -130,7 +130,7 @@ resource "aws_eks_node_group" "spot" {
   instance_types  = var.spot_instance_types
   capacity_type   = "SPOT"
   scaling_config {
-    desired_size = 1
+    desired_size = var.spot_desired_size
     max_size     = 5
     min_size     = 0
   }

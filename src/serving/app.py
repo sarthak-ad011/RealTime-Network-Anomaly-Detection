@@ -33,6 +33,13 @@ MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
 MODEL_NAME = "network-anomaly-detector"
 PREDICTION_BUCKET = os.getenv("PREDICTION_BUCKET", "anomaly-mlops-artifacts-dev")
 
+# Deploy-time sensitivity knob. The model's own threshold is the 95th percentile of
+# validation reconstruction error; scaling it lets an operator trade precision for
+# recall without retraining. Values well below 1.0 make the detector flag almost
+# everything — which is exactly what the canary's anomaly-flag-rate gate exists to
+# catch, since such a deploy stays fast and healthy by every infrastructure measure.
+THRESHOLD_SCALE = float(os.getenv("ANOMALY_THRESHOLD_SCALE", "1.0"))
+
 s3 = boto3.client("s3")
 
 PREDICTION_COUNTER = Counter("anomaly_predictions_total", "Predictions", ["role", "is_anomaly"])
@@ -57,7 +64,9 @@ class PredictionResponse(BaseModel):
 
 class LoadedModel:
     def __init__(self, model, scaler, threshold, version):
-        self.model, self.scaler, self.threshold, self.version = model, scaler, threshold, version
+        self.model, self.scaler, self.version = model, scaler, version
+        self.base_threshold = threshold
+        self.threshold = threshold * THRESHOLD_SCALE
         self.model.eval()
 
     @torch.no_grad()

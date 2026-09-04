@@ -28,12 +28,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
           cache: 'pip'
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # Mirror the serving image: CPU-only torch from PyTorch's index, then the
+          # rest of the pins. The PyPI linux wheel would drag in the whole CUDA
+          # runtime, which this job never uses.
+          pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+          grep -viE '^torch==' requirements.txt > /tmp/req-nontorch.txt
+          pip install -r /tmp/req-nontorch.txt
           pip install pytest ruff
       - name: Lint (ruff)
         run: ruff check src/

@@ -77,7 +77,16 @@ def main(model: str = typer.Option(...), experiment: str = "default",
             with open(scaler_path, "wb") as f:
                 pickle.dump(bundle.scaler, f)
             mlflow.log_artifact(str(scaler_path), "model")
-            mlflow.pytorch.log_model(det.model, "pytorch_model", registered_model_name=MODEL_NAME)
+            # MLflow 3 defaults the PyTorch flavor to the "pt2" traced-graph format,
+            # which refuses to serialise without a concrete input_example to trace
+            # model.forward with. Shape is (batch, seq_len, input_dim).
+            example = bundle.X_val[:2].astype("float32").reshape(2, cfg.seq_len, cfg.input_dim)
+            mlflow.pytorch.log_model(
+                det.model,
+                name="pytorch_model",
+                input_example=example,
+                registered_model_name=MODEL_NAME,
+            )
         else:
             raise typer.BadParameter(f"Unknown model: {model}")
         _push_xcom(run.info.run_id)

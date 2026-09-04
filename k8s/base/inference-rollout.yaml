@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: PLACEHOLDER_ECR_URI/anomaly-mlops:v1
+          image: 170420138680.dkr.ecr.ap-south-1.amazonaws.com/anomaly-mlops:c970f09
           ports:
             - name: http
               containerPort: 8000
